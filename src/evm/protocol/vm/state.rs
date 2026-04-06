@@ -35,6 +35,73 @@ use crate::evm::{
     },
 };
 
+/// Private type: only so we can attach serde field adapters. `EVMPoolState<D>` cannot derive serde
+/// for generic `D` (`TychoSimulationContract<D>` is only (De)serializable for `PreCachedDB`).
+mod evm_pool_state_serde {
+    use std::collections::HashMap;
+
+    use alloy::primitives::{Address, U256};
+    use serde::{Deserialize, Serialize};
+    use serde_with::{serde_as, FromInto};
+    use tycho_common::Bytes;
+
+    use super::{Capability, Overwrites, PreCachedDB, TychoSimulationContract};
+
+    /// `HashMap<(Address, Address), f64>` cannot use JSON object keys; encode as `{ base, quote, price }` rows.
+    #[derive(Serialize, Deserialize)]
+    struct SpotPriceRow {
+        base: Address,
+        quote: Address,
+        price: f64,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct SpotPricesSerde(Vec<SpotPriceRow>);
+
+    impl From<HashMap<(Address, Address), f64>> for SpotPricesSerde {
+        fn from(map: HashMap<(Address, Address), f64>) -> Self {
+            Self(
+                map.into_iter()
+                    .map(|((base, quote), price)| SpotPriceRow {
+                        base,
+                        quote,
+                        price,
+                    })
+                    .collect(),
+            )
+        }
+    }
+
+    impl From<SpotPricesSerde> for HashMap<(Address, Address), f64> {
+        fn from(SpotPricesSerde(rows): SpotPricesSerde) -> Self {
+            rows.into_iter()
+                .map(|r| ((r.base, r.quote), r.price))
+                .collect()
+        }
+    }
+
+    #[serde_as]
+    #[derive(Serialize, Deserialize)]
+    pub(super) struct Fields {
+        pub(super) id: String,
+        pub(super) tokens: Vec<Bytes>,
+        pub(super) balances: HashMap<Address, U256>,
+        #[serde(default)]
+        pub(super) balance_owner: Option<Address>,
+        #[serde_as(as = "FromInto<SpotPricesSerde>")]
+        pub(super) spot_prices: HashMap<(Address, Address), f64>,
+        pub(super) capabilities: Vec<Capability>,
+        pub(super) block_lasting_overwrites: HashMap<Address, Overwrites>,
+        #[serde(default)]
+        pub(super) involved_contracts: Vec<Address>,
+        pub(super) contract_balances: HashMap<Address, HashMap<Address, U256>>,
+        pub(super) manual_updates: bool,
+        pub(super) adapter_contract: TychoSimulationContract<PreCachedDB>,
+        #[serde(default)]
+        pub(super) disable_overwrite_tokens: Vec<Address>,
+    }
+}
+
 #[derive(Clone)]
 pub struct EVMPoolState<D: EngineDatabaseInterface + Clone + Debug>
 where
@@ -234,8 +301,8 @@ where
                         })?;
                         let sell_token_decimals = self.get_decimals(tokens, &sell_token_address)?;
                         let buy_token_decimals = self.get_decimals(tokens, &buy_token_address)?;
-                        *unscaled_price * 10f64.powi(sell_token_decimals as i32) /
-                            10f64.powi(buy_token_decimals as i32)
+                        *unscaled_price * 10f64.powi(sell_token_decimals as i32)
+                            / 10f64.powi(buy_token_decimals as i32)
                     };
 
                     self.spot_prices
@@ -256,8 +323,8 @@ where
                     // Calculate the first sell amount (x1) as 1% of the maximum limit.
                     let x1 = self
                         .get_amount_limits(vec![t0, t1], overwrites.clone())?
-                        .0 /
-                        U256::from(100);
+                        .0
+                        / U256::from(100);
 
                     // Calculate the second sell amount (x2) as x1 + 1% of x1. 1.01% of the max
                     // limit
@@ -556,40 +623,75 @@ where
     }
 }
 
-impl<D> Serialize for EVMPoolState<D>
-where
-    D: EngineDatabaseInterface + Clone + Debug,
-    <D as DatabaseRef>::Error: Debug,
-    <D as EngineDatabaseInterface>::Error: Debug,
-{
-    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        Err(serde::ser::Error::custom("not supported due vm state deps"))
+impl From<&EVMPoolState<PreCachedDB>> for evm_pool_state_serde::Fields {
+    fn from(s: &EVMPoolState<PreCachedDB>) -> Self {
+        let mut capabilities: Vec<Capability> = s.capabilities.iter().cloned().collect();
+        capabilities.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+        let mut involved_contracts: Vec<Address> = s.involved_contracts.iter().copied().collect();
+        involved_contracts.sort();
+        let mut disable_overwrite_tokens: Vec<Address> =
+            s.disable_overwrite_tokens.iter().copied().collect();
+        disable_overwrite_tokens.sort();
+        Self {
+            id: s.id.clone(),
+            tokens: s.tokens.clone(),
+            balances: s.balances.clone(),
+            balance_owner: s.balance_owner,
+            spot_prices: s.spot_prices.clone(),
+            capabilities,
+            block_lasting_overwrites: s.block_lasting_overwrites.clone(),
+            involved_contracts,
+            contract_balances: s.contract_balances.clone(),
+            manual_updates: s.manual_updates,
+            adapter_contract: s.adapter_contract.clone(),
+            disable_overwrite_tokens,
+        }
     }
 }
 
-impl<'de, D> Deserialize<'de> for EVMPoolState<D>
-where
-    D: EngineDatabaseInterface + Clone + Debug,
-    <D as DatabaseRef>::Error: Debug,
-    <D as EngineDatabaseInterface>::Error: Debug,
-{
-    fn deserialize<De>(_deserializer: De) -> Result<Self, De::Error>
+impl From<evm_pool_state_serde::Fields> for EVMPoolState<PreCachedDB> {
+    fn from(w: evm_pool_state_serde::Fields) -> Self {
+        let capabilities: HashSet<Capability> = w.capabilities.into_iter().collect();
+        let involved_contracts: HashSet<Address> = w.involved_contracts.into_iter().collect();
+        let disable_overwrite_tokens: HashSet<Address> =
+            w.disable_overwrite_tokens.into_iter().collect();
+        EVMPoolState::new(
+            w.id,
+            w.tokens,
+            w.balances,
+            w.balance_owner,
+            w.contract_balances,
+            w.spot_prices,
+            capabilities,
+            w.block_lasting_overwrites,
+            involved_contracts,
+            w.manual_updates,
+            w.adapter_contract,
+            disable_overwrite_tokens,
+        )
+    }
+}
+
+impl Serialize for EVMPoolState<PreCachedDB> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        evm_pool_state_serde::Fields::from(self).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for EVMPoolState<PreCachedDB> {
+    fn deserialize<De>(deserializer: De) -> Result<Self, De::Error>
     where
         De: serde::Deserializer<'de>,
     {
-        Err(serde::de::Error::custom("not supported due vm state deps"))
+        Ok(evm_pool_state_serde::Fields::deserialize(deserializer)?.into())
     }
 }
 
 #[typetag::serialize]
-impl<D> ProtocolSim for EVMPoolState<D>
-where
-    D: EngineDatabaseInterface + Clone + Debug + 'static,
-    <D as DatabaseRef>::Error: Debug,
-    <D as EngineDatabaseInterface>::Error: Debug,
+impl ProtocolSim for EVMPoolState<PreCachedDB>
 {
     fn fee(&self) -> f64 {
         todo!()
@@ -625,8 +727,8 @@ where
         )?;
         let (sell_amount_respecting_limit, sell_amount_exceeds_limit) = if self
             .capabilities
-            .contains(&Capability::HardLimits) &&
-            sell_amount_limit < sell_amount
+            .contains(&Capability::HardLimits)
+            && sell_amount_limit < sell_amount
         {
             (sell_amount_limit, true)
         } else {

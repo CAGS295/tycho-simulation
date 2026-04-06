@@ -10,11 +10,12 @@ use revm::{
     state::{AccountInfo, Bytecode},
     DatabaseRef,
 };
-use serde::{Deserialize, Serialize};
+use serde::{de::IgnoredAny, Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, error, instrument, warn};
 use tycho_client::feed::BlockHeader;
 
+use super::SHARED_TYCHO_DB;
 use crate::evm::{
     account_storage::{AccountStorage, StateUpdate},
     engine_db::engine_db_interface::EngineDatabaseInterface,
@@ -65,6 +66,26 @@ pub struct PreCachedDB {
     /// exclusive write access to the data and `Arc` for shared ownership of the lock across
     /// threads.
     pub inner: Arc<RwLock<PreCachedDBInner>>,
+}
+
+impl<'de> Deserialize<'de> for PreCachedDB {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Serialize writes `null`; we must consume whatever is on the wire or serde_json loses sync.
+        IgnoredAny::deserialize(deserializer)?;
+        Ok(SHARED_TYCHO_DB.clone())
+    }
+}
+
+impl Serialize for PreCachedDB {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_none()
+    }
 }
 
 impl PreCachedDB {

@@ -48,7 +48,7 @@ pub struct TychoSimulationResponse {
 /// # Errors
 /// Returns errors of type `SimulationError` when encoding, decoding, or simulation operations
 /// fail. These errors provide detailed feedback on potential issues.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct TychoSimulationContract<D: EngineDatabaseInterface + Clone + Debug>
 where
     <D as DatabaseRef>::Error: Debug,
@@ -108,9 +108,9 @@ where
         // Remove extra prefix if present (32 bytes for dynamic data)
         // Alloy encoding is including a prefix for dynamic data indicating the offset or length
         // but at this point we don't want that
-        if encoded_args.len() > 32 &&
-            encoded_args[..32] ==
-                [0u8; 31]
+        if encoded_args.len() > 32
+            && encoded_args[..32]
+                == [0u8; 31]
                     .into_iter()
                     .chain([32].to_vec())
                     .collect::<Vec<u8>>()

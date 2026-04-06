@@ -22,7 +22,7 @@ use tycho_common::simulation::errors::SimulationError;
 /// - `HardLimits`: Indicates that if we try to go over the sell limits, the pool will revert.
 /// - `MarginalPrice`: Indicates whether the pool's price function can be called with amountIn=0 to
 ///   return the current price
-#[derive(Eq, PartialEq, Hash, Debug, Display, Clone)]
+#[derive(Eq, PartialEq, Hash, Debug, Display, Clone, serde::Deserialize, serde::Serialize)]
 pub enum Capability {
     SellSide = 1,
     BuySide = 2,

@@ -13,7 +13,7 @@ dotenv = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }
 itertools = { workspace = true }
-lru = "0.16.1"
+lru = "0.16.3"
 num-bigint = { workspace = true }
 num-traits = { workspace = true }
 miette = { version = "7.6.0" }
@@ -27,7 +27,7 @@ tracing = { workspace = true }
 tycho-client = { workspace = true }
 tycho-common = { workspace = true }
 tycho-ethereum = { workspace = true }
-tycho-execution = { workspace = true }
+tycho-execution = ">=0.169.0"
 tycho-simulation = { path = "..", features = ["evm"] }
 urlencoding = "2.1.3"
 tracing-subscriber = { workspace = true }

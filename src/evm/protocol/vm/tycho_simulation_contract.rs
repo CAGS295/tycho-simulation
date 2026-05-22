@@ -142,7 +142,7 @@ where
             transient_storage,
         };
 
-        let sim_result = self.simulate(params)?;
+        let sim_result = self.simulate(params, selector)?;
 
         Ok(TychoSimulationResponse {
             return_value: sim_result.result.to_vec(),
@@ -150,10 +150,18 @@ where
         })
     }
 
-    fn simulate(&self, params: SimulationParameters) -> Result<SimulationResult, SimulationError> {
-        self.engine
-            .simulate(&params)
-            .map_err(|e| coerce_error(&e, "pool_state", params.gas_limit))
+    fn simulate(
+        &self,
+        params: SimulationParameters,
+        selector: &str,
+    ) -> Result<SimulationResult, SimulationError> {
+        self.engine.simulate(&params).map_err(|e| {
+            coerce_error(
+                &e,
+                &format!("adapter={:?}, fn={selector}", self.address),
+                params.gas_limit,
+            )
+        })
     }
 }
 

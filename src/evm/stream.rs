@@ -395,6 +395,12 @@ impl ProtocolStreamBuilder {
         self
     }
 
+    /// Minimum token quality score for a component to be decoded.
+    pub fn min_token_quality(mut self, quality: u32) -> Self {
+        self.decoder.min_token_quality(quality);
+        self
+    }
+
     /// Configures the retry policy for websocket reconnects.
     pub fn websocket_retry_config(mut self, config: &RetryConfiguration) -> Self {
         self.stream_builder = self

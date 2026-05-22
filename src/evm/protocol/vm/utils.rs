@@ -48,7 +48,12 @@ pub(crate) fn coerce_error(
                     );
                 }
             }
-            SimulationError::FatalError(format!("Simulation reverted for unknown reason: {reason}"))
+            let gas_info = gas_used
+                .map(|g| format!(" (gas_used: {g})"))
+                .unwrap_or_default();
+            SimulationError::FatalError(format!(
+                "Simulation reverted for unknown reason: {reason}{gas_info}. Context: {pool_state}"
+            ))
         }
         // Check if "OutOfGas" is part of the error message
         SimulationEngineError::TransactionError { ref data, ref gas_used }
@@ -80,6 +85,9 @@ pub(crate) fn coerce_error(
 }
 
 fn parse_solidity_error_message(data: &str) -> String {
+    if data == "0x" {
+        return "Reverted with no reason (empty revert data)".to_string();
+    }
     // 10 for "0x" + 8 hex chars error signature
     if data.len() >= 10 {
         let data_bytes = match Vec::from_hex(&data[2..]) {
@@ -450,6 +458,24 @@ mod tests {
     }
 
     #[test]
+    fn test_maybe_coerce_error_empty_revert() {
+        let err = SimulationEngineError::TransactionError {
+            data: "0x".to_string(),
+            gas_used: Some(50000),
+        };
+
+        let result = coerce_error(&err, "adapter=0x1234, fn=getLimits(bytes32,address,address)", Some(1_000_000));
+
+        if let SimulationError::FatalError(msg) = result {
+            assert!(msg.contains("no reason"), "Expected empty-revert message, got: {msg}");
+            assert!(msg.contains("gas_used: 50000"), "Expected gas info, got: {msg}");
+            assert!(msg.contains("getLimits"), "Expected function context, got: {msg}");
+        } else {
+            panic!("Expected FatalError for empty revert, got: {result:?}");
+        }
+    }
+
+    #[test]
     fn test_maybe_coerce_error_revert_no_gas_info() {
         let err = SimulationEngineError::TransactionError{
             data: "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000011496e76616c6964206f7065726174696f6e000000000000000000000000000000".to_string(),
@@ -550,6 +576,13 @@ mod tests {
         let result = parse_solidity_error_message(data);
 
         assert_eq!(result, "AssertionError");
+    }
+
+    #[test]
+    fn test_parse_solidity_error_message_empty_revert() {
+        let data = "0x";
+        let result = parse_solidity_error_message(data);
+        assert!(result.contains("no reason"), "Expected empty revert message, got: {result}");
     }
 
     #[test]

@@ -130,6 +130,10 @@ where
         self.skip_state_decode_failures = skip;
     }
 
+    pub fn min_token_quality(&mut self, quality: u32) {
+        self.min_token_quality = quality;
+    }
+
     /// Registers a decoder for a given exchange with a decoder context.
     ///
     /// This method maps an exchange identifier to a specific protocol simulation type.
